@@ -1,12 +1,10 @@
 # Copyright (c) 2016 Ultimaker B.V.
-# Cura is released under the terms of the AGPLv3 or higher.
+# Cura is released under the terms of the LGPLv3 or higher.
 
-from PyQt5.QtCore import Qt, QUrl, pyqtSignal, QObject, pyqtProperty, QCoreApplication
+from PyQt5.QtCore import pyqtSignal, QObject, pyqtProperty, QCoreApplication
 from UM.FlameProfiler import pyqtSlot
-from PyQt5.QtQml import QQmlComponent, QQmlContext
 from UM.PluginRegistry import PluginRegistry
 from UM.Application import Application
-from UM.Logger import Logger
 from UM.i18n import i18nCatalog
 from UM.Settings.ContainerRegistry import ContainerRegistry
 
@@ -26,16 +24,19 @@ class WorkspaceDialog(QObject):
         self._view = None
         self._qml_url = "WorkspaceDialog.qml"
         self._lock = threading.Lock()
-        self._default_strategy = "override"
+        self._default_strategy = None
         self._result = {"machine": self._default_strategy,
                         "quality_changes": self._default_strategy,
+                        "definition_changes": self._default_strategy,
                         "material": self._default_strategy}
         self._visible = False
         self.showDialogSignal.connect(self.__show)
 
         self._has_quality_changes_conflict = False
+        self._has_definition_changes_conflict = False
         self._has_machine_conflict = False
         self._has_material_conflict = False
+        self._has_visible_settings_field = False
         self._num_visible_settings = 0
         self._num_user_settings = 0
         self._active_mode = ""
@@ -51,10 +52,12 @@ class WorkspaceDialog(QObject):
 
     machineConflictChanged = pyqtSignal()
     qualityChangesConflictChanged = pyqtSignal()
+    definitionChangesConflictChanged = pyqtSignal()
     materialConflictChanged = pyqtSignal()
     numVisibleSettingsChanged = pyqtSignal()
     activeModeChanged = pyqtSignal()
     qualityNameChanged = pyqtSignal()
+    hasVisibleSettingsFieldChanged = pyqtSignal()
     numSettingsOverridenByQualityChangesChanged = pyqtSignal()
     qualityTypeChanged = pyqtSignal()
     machineNameChanged = pyqtSignal()
@@ -70,8 +73,9 @@ class WorkspaceDialog(QObject):
         return self._variant_type
 
     def setVariantType(self, variant_type):
-        self._variant_type = variant_type
-        self.variantTypeChanged.emit()
+        if self._variant_type != variant_type:
+            self._variant_type = variant_type
+            self.variantTypeChanged.emit()
 
     @pyqtProperty(str, notify=machineTypeChanged)
     def machineType(self):
@@ -82,8 +86,9 @@ class WorkspaceDialog(QObject):
         self.machineTypeChanged.emit()
 
     def setNumUserSettings(self, num_user_settings):
-        self._num_user_settings = num_user_settings
-        self.numVisibleSettingsChanged.emit()
+        if self._num_user_settings != num_user_settings:
+            self._num_user_settings = num_user_settings
+            self.numVisibleSettingsChanged.emit()
 
     @pyqtProperty(int, notify=numUserSettingsChanged)
     def numUserSettings(self):
@@ -94,40 +99,45 @@ class WorkspaceDialog(QObject):
         return self._objects_on_plate
 
     def setHasObjectsOnPlate(self, objects_on_plate):
-        self._objects_on_plate = objects_on_plate
-        self.objectsOnPlateChanged.emit()
+        if self._objects_on_plate != objects_on_plate:
+            self._objects_on_plate = objects_on_plate
+            self.objectsOnPlateChanged.emit()
 
     @pyqtProperty("QVariantList", notify = materialLabelsChanged)
     def materialLabels(self):
         return self._material_labels
 
     def setMaterialLabels(self, material_labels):
-        self._material_labels = material_labels
-        self.materialLabelsChanged.emit()
+        if self._material_labels != material_labels:
+            self._material_labels = material_labels
+            self.materialLabelsChanged.emit()
 
     @pyqtProperty("QVariantList", notify=extrudersChanged)
     def extruders(self):
         return self._extruders
 
     def setExtruders(self, extruders):
-        self._extruders = extruders
-        self.extrudersChanged.emit()
+        if self._extruders != extruders:
+            self._extruders = extruders
+            self.extrudersChanged.emit()
 
     @pyqtProperty(str, notify = machineNameChanged)
     def machineName(self):
         return self._machine_name
 
     def setMachineName(self, machine_name):
-        self._machine_name = machine_name
-        self.machineNameChanged.emit()
+        if self._machine_name != machine_name:
+            self._machine_name = machine_name
+            self.machineNameChanged.emit()
 
     @pyqtProperty(str, notify=qualityTypeChanged)
     def qualityType(self):
         return self._quality_type
 
     def setQualityType(self, quality_type):
-        self._quality_type = quality_type
-        self.qualityTypeChanged.emit()
+        if self._quality_type != quality_type:
+            self._quality_type = quality_type
+            self.qualityTypeChanged.emit()
 
     @pyqtProperty(int, notify=numSettingsOverridenByQualityChangesChanged)
     def numSettingsOverridenByQualityChanges(self):
@@ -142,8 +152,9 @@ class WorkspaceDialog(QObject):
         return self._quality_name
 
     def setQualityName(self, quality_name):
-        self._quality_name = quality_name
-        self.qualityNameChanged.emit()
+        if self._quality_name != quality_name:
+            self._quality_name = quality_name
+            self.qualityNameChanged.emit()
 
     @pyqtProperty(str, notify=activeModeChanged)
     def activeMode(self):
@@ -156,6 +167,14 @@ class WorkspaceDialog(QObject):
             self._active_mode = i18n_catalog.i18nc("@title:tab", "Custom")
         self.activeModeChanged.emit()
 
+    @pyqtProperty(int, notify = hasVisibleSettingsFieldChanged)
+    def hasVisibleSettingsField(self):
+        return self._has_visible_settings_field
+
+    def setHasVisibleSettingsField(self, has_visible_settings_field):
+        self._has_visible_settings_field = has_visible_settings_field
+        self.hasVisibleSettingsFieldChanged.emit()
+
     @pyqtProperty(int, constant = True)
     def totalNumberOfSettings(self):
         return len(ContainerRegistry.getInstance().findDefinitionContainers(id="fdmprinter")[0].getAllKeys())
@@ -165,8 +184,9 @@ class WorkspaceDialog(QObject):
         return self._num_visible_settings
 
     def setNumVisibleSettings(self, num_visible_settings):
-        self._num_visible_settings = num_visible_settings
-        self.numVisibleSettingsChanged.emit()
+        if self._num_visible_settings != num_visible_settings:
+            self._num_visible_settings = num_visible_settings
+            self.numVisibleSettingsChanged.emit()
 
     @pyqtProperty(bool, notify = machineConflictChanged)
     def machineConflict(self):
@@ -175,6 +195,10 @@ class WorkspaceDialog(QObject):
     @pyqtProperty(bool, notify=qualityChangesConflictChanged)
     def qualityChangesConflict(self):
         return self._has_quality_changes_conflict
+
+    @pyqtProperty(bool, notify=definitionChangesConflictChanged)
+    def definitionChangesConflict(self):
+        return self._has_definition_changes_conflict
 
     @pyqtProperty(bool, notify=materialConflictChanged)
     def materialConflict(self):
@@ -191,35 +215,47 @@ class WorkspaceDialog(QObject):
         Application.getInstance().getBackend().close()
 
     def setMaterialConflict(self, material_conflict):
-        self._has_material_conflict = material_conflict
-        self.materialConflictChanged.emit()
+        if self._has_material_conflict != material_conflict:
+            self._has_material_conflict = material_conflict
+            self.materialConflictChanged.emit()
 
     def setMachineConflict(self, machine_conflict):
-        self._has_machine_conflict = machine_conflict
-        self.machineConflictChanged.emit()
+        if self._has_machine_conflict != machine_conflict:
+            self._has_machine_conflict = machine_conflict
+            self.machineConflictChanged.emit()
 
     def setQualityChangesConflict(self, quality_changes_conflict):
-        self._has_quality_changes_conflict = quality_changes_conflict
-        self.qualityChangesConflictChanged.emit()
+        if self._has_quality_changes_conflict != quality_changes_conflict:
+            self._has_quality_changes_conflict = quality_changes_conflict
+            self.qualityChangesConflictChanged.emit()
+
+    def setDefinitionChangesConflict(self, definition_changes_conflict):
+        if self._has_definition_changes_conflict != definition_changes_conflict:
+            self._has_definition_changes_conflict = definition_changes_conflict
+            self.definitionChangesConflictChanged.emit()
 
     def getResult(self):
         if "machine" in self._result and not self._has_machine_conflict:
             self._result["machine"] = None
         if "quality_changes" in self._result and not self._has_quality_changes_conflict:
             self._result["quality_changes"] = None
+        if "definition_changes" in self._result and not self._has_definition_changes_conflict:
+            self._result["definition_changes"] = None
         if "material" in self._result and not self._has_material_conflict:
             self._result["material"] = None
+
+        # If the machine needs to be re-created, the definition_changes should also be re-created.
+        # If the machine strategy is None, it means that there is no name conflict with existing ones. In this case
+        # new definitions changes are created
+        if "machine" in self._result:
+            if self._result["machine"] == "new" or self._result["machine"] is None and self._result["definition_changes"] is None:
+                self._result["definition_changes"] = "new"
+
         return self._result
 
     def _createViewFromQML(self):
-        path = QUrl.fromLocalFile(os.path.join(PluginRegistry.getInstance().getPluginPath("3MFReader"), self._qml_url))
-        self._component = QQmlComponent(Application.getInstance()._engine, path)
-        self._context = QQmlContext(Application.getInstance()._engine.rootContext())
-        self._context.setContextProperty("manager", self)
-        self._view = self._component.create(self._context)
-        if self._view is None:
-            Logger.log("c", "QQmlComponent status %s", self._component.status())
-            Logger.log("c", "QQmlComponent error string %s", self._component.errorString())
+        path = os.path.join(PluginRegistry.getInstance().getPluginPath("3MFReader"), self._qml_url)
+        self._view = Application.getInstance().createQmlComponent(path, {"manager": self})
 
     def show(self):
         # Emit signal so the right thread actually shows the view.
@@ -228,6 +264,7 @@ class WorkspaceDialog(QObject):
         # Reset the result
         self._result = {"machine": self._default_strategy,
                         "quality_changes": self._default_strategy,
+                        "definition_changes": self._default_strategy,
                         "material": self._default_strategy}
         self._visible = True
         self.showDialogSignal.emit()
@@ -235,14 +272,28 @@ class WorkspaceDialog(QObject):
     @pyqtSlot()
     ##  Used to notify the dialog so the lock can be released.
     def notifyClosed(self):
-        self._result = {}
+        self._result = {} # The result should be cleared before hide, because after it is released the main thread lock
         self._visible = False
-        self._lock.release()
+        try:
+            self._lock.release()
+        except:
+            pass
 
     def hide(self):
         self._visible = False
-        self._lock.release()
         self._view.hide()
+        try:
+            self._lock.release()
+        except:
+            pass
+
+    @pyqtSlot(bool)
+    def _onVisibilityChanged(self, visible):
+        if not visible:
+            try:
+                self._lock.release()
+            except:
+                pass
 
     @pyqtSlot()
     def onOkButtonClicked(self):
@@ -251,9 +302,9 @@ class WorkspaceDialog(QObject):
 
     @pyqtSlot()
     def onCancelButtonClicked(self):
+        self._result = {}
         self._view.hide()
         self.hide()
-        self._result = {}
 
     ##  Block thread until the dialog is closed.
     def waitForClose(self):

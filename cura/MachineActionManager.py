@@ -1,5 +1,5 @@
 # Copyright (c) 2016 Ultimaker B.V.
-# Cura is released under the terms of the AGPLv3 or higher.
+# Cura is released under the terms of the LGPLv3 or higher.
 from UM.Logger import Logger
 from UM.PluginRegistry import PluginRegistry  # So MachineAction can be added as plugin type
 
@@ -105,7 +105,7 @@ class MachineActionManager(QObject):
         if definition_id in self._supported_actions:
             return list(self._supported_actions[definition_id])
         else:
-            return set()
+            return list()
 
     ##  Get all actions required by given machine
     #   \param definition_id The ID of the definition you want the required actions of

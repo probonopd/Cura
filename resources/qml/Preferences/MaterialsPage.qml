@@ -1,5 +1,5 @@
-// Copyright (c) 2016 Ultimaker B.V.
-// Cura is released under the terms of the AGPLv3 or higher.
+//Copyright (c) 2017 Ultimaker B.V.
+//Cura is released under the terms of the LGPLv3 or higher.
 
 import QtQuick 2.1
 import QtQuick.Controls 1.1
@@ -14,11 +14,17 @@ UM.ManagementPage
 
     title: catalog.i18nc("@title:tab", "Materials");
 
-    model: UM.InstanceContainersModel
+    Component.onCompleted:
+    {
+        // Workaround to make sure all of the items are visible
+        objectList.positionViewAtBeginning();
+    }
+
+    model: Cura.MaterialsModel
     {
         filter:
         {
-            var result = { "type": "material" }
+            var result = { "type": "material", "approximate_diameter": Math.round(materialDiameterProvider.properties.value).toString() }
             if(Cura.MachineManager.filterMaterialsByMachine)
             {
                 result.definition = Cura.MachineManager.activeQualityDefinitionId;
@@ -47,21 +53,21 @@ UM.ManagementPage
 
         Row
         {
-            spacing: UM.Theme.getSize("default_margin").width / 2;
-            anchors.left: parent.left;
-            anchors.leftMargin: UM.Theme.getSize("default_margin").width;
-            anchors.right: parent.right;
+            spacing: (UM.Theme.getSize("default_margin").width / 2) | 0
+            anchors.left: parent.left
+            anchors.leftMargin: UM.Theme.getSize("default_margin").width
+            anchors.right: parent.right
             Rectangle
             {
-                width: parent.height * 0.8
-                height: parent.height * 0.8
+                width: Math.round(parent.height * 0.8)
+                height: Math.round(parent.height * 0.8)
                 color: model.metadata.color_code
                 border.color: isCurrentItem ? palette.highlightedText : palette.text;
                 anchors.verticalCenter: parent.verticalCenter
             }
             Label
             {
-                width: parent.width * 0.3
+                width: Math.round((parent.width * 0.3))
                 text: model.metadata.material
                 elide: Text.ElideRight
                 font.italic: model.id == activeId
@@ -81,6 +87,7 @@ UM.ManagementPage
             anchors.fill: parent;
             onClicked:
             {
+                forceActiveFocus();
                 if(!parent.ListView.isCurrentItem)
                 {
                     parent.ListView.view.currentIndex = index;
@@ -91,9 +98,11 @@ UM.ManagementPage
     }
 
     activeId: Cura.MachineManager.activeMaterialId
-    activeIndex: {
+    activeIndex: getIndexById(activeId)
+    function getIndexById(material_id)
+    {
         for(var i = 0; i < model.rowCount(); i++) {
-            if (model.getItem(i).id == Cura.MachineManager.activeMaterialId) {
+            if (model.getItem(i).id == material_id) {
                 return i;
             }
         }
@@ -102,14 +111,12 @@ UM.ManagementPage
 
     scrollviewCaption:
     {
+        var caption = catalog.i18nc("@action:label", "Printer") + ": " + Cura.MachineManager.activeMachineName;
         if (Cura.MachineManager.hasVariants)
         {
-            catalog.i18nc("@action:label %1 is printer name, %2 is how this printer names variants, %3 is variant name", "Printer: %1, %2: %3").arg(Cura.MachineManager.activeMachineName).arg(Cura.MachineManager.activeDefinitionVariantsName).arg(Cura.MachineManager.activeVariantName)
+            caption += ", " + Cura.MachineManager.activeDefinitionVariantsName + ": " + Cura.MachineManager.activeVariantName;
         }
-        else
-        {
-            catalog.i18nc("@action:label %1 is printer name","Printer: %1").arg(Cura.MachineManager.activeMachineName)
-        }
+        return caption;
     }
     detailsVisible: true
 
@@ -123,54 +130,73 @@ UM.ManagementPage
     }
 
     buttons: [
-        Button
-        {
-            text: catalog.i18nc("@action:button", "Activate");
+
+        // Activate button
+        Button {
+            text: catalog.i18nc("@action:button", "Activate")
             iconName: "list-activate";
             enabled: base.currentItem != null && base.currentItem.id != Cura.MachineManager.activeMaterialId && Cura.MachineManager.hasMaterials
-            onClicked: Cura.MachineManager.setActiveMaterial(base.currentItem.id)
+            onClicked: {
+                forceActiveFocus()
+                Cura.MachineManager.setActiveMaterial(base.currentItem.id)
+                currentItem = base.model.getItem(base.objectList.currentIndex) // Refresh the current item.
+            }
         },
-        Button
-        {
+
+        // Create button
+        Button {
+            text: catalog.i18nc("@action:button", "Create")
+            iconName: "list-add"
+            onClicked: {
+                forceActiveFocus()
+                Cura.ContainerManager.createMaterial()
+            }
+        },
+
+        // Duplicate button
+        Button {
             text: catalog.i18nc("@action:button", "Duplicate");
             iconName: "list-add";
             enabled: base.currentItem != null
-            onClicked:
-            {
-                var base_file = Cura.ContainerManager.getContainerMetaDataEntry(base.currentItem.id, "base_file")
-                // We need to copy the base container instead of the specific variant.
-                var material_id = base_file == "" ? Cura.ContainerManager.duplicateMaterial(base.currentItem.id): Cura.ContainerManager.duplicateMaterial(base_file)
-                if(material_id == "")
-                {
-                    return
-                }
-                if(Cura.MachineManager.hasMaterials)
-                {
-                    Cura.MachineManager.setActiveMaterial(material_id)
-                }
+            onClicked: {
+                forceActiveFocus()
+                Cura.ContainerManager.duplicateOriginalMaterial(base.currentItem.id)
             }
         },
-        Button
-        {
-            text: catalog.i18nc("@action:button", "Remove");
-            iconName: "list-remove";
+
+        // Remove button
+        Button {
+            text: catalog.i18nc("@action:button", "Remove")
+            iconName: "list-remove"
             enabled: base.currentItem != null && !base.currentItem.readOnly && !Cura.ContainerManager.isContainerUsed(base.currentItem.id)
-            onClicked: confirmDialog.open()
+            onClicked: {
+                forceActiveFocus()
+                confirmDialog.open()
+            }
         },
-        Button
-        {
-            text: catalog.i18nc("@action:button", "Import");
-            iconName: "document-import";
-            onClicked: importDialog.open();
-            visible: true;
+
+        // Import button
+        Button {
+            text: catalog.i18nc("@action:button", "Import")
+            iconName: "document-import"
+            onClicked: {
+                forceActiveFocus()
+                importDialog.open()
+            }
+            visible: true
         },
-        Button
-        {
+
+        // Export button
+        Button {
             text: catalog.i18nc("@action:button", "Export")
             iconName: "document-export"
-            onClicked: exportDialog.open()
+            onClicked: {
+                forceActiveFocus()
+                exportDialog.open()
+            }
             enabled: currentItem != null
         }
+
     ]
 
     Item {
@@ -185,17 +211,6 @@ UM.ManagementPage
             height: childrenRect.height
 
             Label { text: materialProperties.name; font: UM.Theme.getFont("large"); }
-            Button
-            {
-                id: editButton
-                anchors.right: parent.right;
-                text: catalog.i18nc("@action:button", "Edit");
-                iconName: "document-edit";
-
-                enabled: base.currentItem != null && !base.currentItem.readOnly
-
-                checkable: enabled
-            }
         }
 
         MaterialView
@@ -209,16 +224,19 @@ UM.ManagementPage
                 bottom: parent.bottom
             }
 
-            editingEnabled: editButton.checkable && editButton.checked;
+            editingEnabled: base.currentItem != null && !base.currentItem.readOnly
 
             properties: materialProperties
             containerId: base.currentItem != null ? base.currentItem.id : ""
+
+            property alias pane: base
         }
 
         QtObject
         {
             id: materialProperties
 
+            property string guid: "00000000-0000-0000-0000-000000000000"
             property string name: "Unknown";
             property string profile_type: "Unknown";
             property string supplier: "Unknown";
@@ -229,6 +247,7 @@ UM.ManagementPage
 
             property real density: 0.0;
             property real diameter: 0.0;
+            property string approximate_diameter: "0";
 
             property real spool_cost: 0.0;
             property real spool_weight: 0.0;
@@ -252,10 +271,20 @@ UM.ManagementPage
                     base_file = base.currentItem.id
                 }
                 var guid = Cura.ContainerManager.getContainerMetaDataEntry(base.currentItem.id, "GUID")
+                // remove base container first, it otherwise triggers loading the base file while removing other containers
+                var base_containers = Cura.ContainerManager.findInstanceContainers({"GUID": guid, "id": base_file, "base_file": base_file, "type": "material"})
+                for(var i in base_containers)
+                {
+                    Cura.ContainerManager.removeContainer(base_containers[i]);
+                }
                 var containers = Cura.ContainerManager.findInstanceContainers({"GUID": guid, "base_file": base_file, "type": "material"})
                 for(var i in containers)
                 {
-                    Cura.ContainerManager.removeContainer(containers[i])
+                    Cura.ContainerManager.removeContainer(containers[i]);
+                }
+                if(base.objectList.currentIndex > 0)
+                {
+                    base.objectList.currentIndex--;
                 }
                 currentItem = base.model.getItem(base.objectList.currentIndex) // Refresh the current item.
             }
@@ -270,15 +299,14 @@ UM.ManagementPage
             folder: CuraApplication.getDefaultPath("dialog_material_path")
             onAccepted:
             {
-                var result = Cura.ContainerManager.importContainer(fileUrl)
+                var result = Cura.ContainerManager.importMaterialContainer(fileUrl)
 
                 messageDialog.title = catalog.i18nc("@title:window", "Import Material")
-                messageDialog.text = catalog.i18nc("@info:status", "Could not import material <filename>%1</filename>: <message>%2</message>").arg(fileUrl).arg(result.message)
+                messageDialog.text = catalog.i18nc("@info:status Don't translate the XML tags <filename> or <message>!", "Could not import material <filename>%1</filename>: <message>%2</message>").arg(fileUrl).arg(result.message)
                 if(result.status == "success")
                 {
                     messageDialog.icon = StandardIcon.Information
-                    messageDialog.text = catalog.i18nc("@info:status", "Successfully imported material <filename>%1</filename>").arg(fileUrl)
-                    currentItem = base.model.getItem(base.objectList.currentIndex)
+                    messageDialog.text = catalog.i18nc("@info:status Don't translate the XML tag <filename>!", "Successfully imported material <filename>%1</filename>").arg(fileUrl)
                 }
                 else if(result.status == "duplicate")
                 {
@@ -315,13 +343,13 @@ UM.ManagementPage
                 if(result.status == "error")
                 {
                     messageDialog.icon = StandardIcon.Critical
-                    messageDialog.text = catalog.i18nc("@info:status", "Failed to export material to <filename>%1</filename>: <message>%2</message>").arg(fileUrl).arg(result.message)
+                    messageDialog.text = catalog.i18nc("@info:status Don't translate the XML tags <filename> and <message>!", "Failed to export material to <filename>%1</filename>: <message>%2</message>").arg(fileUrl).arg(result.message)
                     messageDialog.open()
                 }
                 else if(result.status == "success")
                 {
                     messageDialog.icon = StandardIcon.Information
-                    messageDialog.text = catalog.i18nc("@info:status", "Successfully exported material to <filename>%1</filename>").arg(result.path)
+                    messageDialog.text = catalog.i18nc("@info:status Don't translate the XML tag <filename>!", "Successfully exported material to <filename>%1</filename>").arg(result.path)
                     messageDialog.open()
                 }
                 CuraApplication.setDefaultPath("dialog_material_path", folder)
@@ -331,6 +359,16 @@ UM.ManagementPage
         MessageDialog
         {
             id: messageDialog
+        }
+
+        UM.SettingPropertyProvider
+        {
+            id: materialDiameterProvider
+
+            containerStackId: Cura.ExtruderManager.activeExtruderStackId
+            key: "material_diameter"
+            watchedProperties: [ "value" ]
+            storeIndex: 5
         }
 
         UM.I18nCatalog { id: catalog; name: "cura"; }
@@ -344,6 +382,7 @@ UM.ManagementPage
             return
         }
         materialProperties.name = currentItem.name;
+        materialProperties.guid = Cura.ContainerManager.getContainerMetaDataEntry(base.currentItem.id, "GUID");
 
         if(currentItem.metadata != undefined && currentItem.metadata != null)
         {
@@ -359,11 +398,13 @@ UM.ManagementPage
             {
                 materialProperties.density = currentItem.metadata.properties.density ? currentItem.metadata.properties.density : 0.0;
                 materialProperties.diameter = currentItem.metadata.properties.diameter ? currentItem.metadata.properties.diameter : 0.0;
+                materialProperties.approximate_diameter = currentItem.metadata.approximate_diameter ? currentItem.metadata.approximate_diameter : "0";
             }
             else
             {
                 materialProperties.density = 0.0;
                 materialProperties.diameter = 0.0;
+                materialProperties.approximate_diameter = "0";
             }
 
         }
